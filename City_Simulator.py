@@ -403,7 +403,7 @@ class CitySimulator:
         if not hasattr(self, 'tick_count'):
             self.tick_count = 0
         self.tick_count += 1
-        is_full = (self.tick_count % 10 == 1)
+        is_full = (self.tick_count % 3 == 1)
 
         rush = self.context_tags["rush_hour"]
         zone_data = []
