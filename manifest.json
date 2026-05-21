@@ -1,0 +1,16 @@
+{
+  "name": "CityBike Dashboard",
+  "short_name": "CityBike",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#eff3f8",
+  "theme_color": "#eff3f8",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+<!-- Copyright (c) 2026 Wei-Chieh Hsia. All rights reserved. -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CityBike Dashboard</title>
+    
+    <!-- PWA Settings -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#eff3f8">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="CityBike">
+    <link rel="apple-touch-icon" href="icon.svg">
+
+    <!-- MQTT Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- External CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="app-container">
+
+        <!-- ============================================================
+             FULL-SCREEN MAP (background layer)
+             ============================================================ -->
+        <div class="map-fullscreen" id="map-fullscreen">
+            <svg class="map-svg" viewBox="0 0 400 800" preserveAspectRatio="xMidYMid slice"
+                xmlns="http://www.w3.org/2000/svg">
+                <!-- land base -->
+                <rect x="0" y="0" width="400" height="800" fill="var(--map-land)" />
+
+                <!-- city blocks: top half -->
+                <rect x="18" y="40"  width="120" height="92"  rx="12" fill="var(--map-block)" />
+                <rect x="160" y="30" width="110" height="86"  rx="12" fill="var(--map-block)" />
+                <rect x="292" y="46" width="92"  height="96"  rx="12" fill="var(--map-block)" />
+                <rect x="22"  y="180" width="116" height="90" rx="12" fill="var(--map-block)" />
+                <rect x="160" y="172" width="120" height="92" rx="12" fill="var(--map-block)" />
+                <rect x="296" y="186" width="88"  height="84" rx="12" fill="var(--map-block)" />
+
+                <!-- city blocks: middle/bottom -->
+                <rect x="20"  y="340" width="118" height="86" rx="12" fill="var(--map-block)" />
+                <rect x="160" y="332" width="108" height="92" rx="12" fill="var(--map-block)" />
+                <rect x="288" y="346" width="96"  height="80" rx="12" fill="var(--map-block)" />
+                <rect x="24"  y="490" width="108" height="92" rx="12" fill="var(--map-block)" />
+                <rect x="158" y="500" width="116" height="80" rx="12" fill="var(--map-block)" />
+                <rect x="296" y="488" width="90"  height="98" rx="12" fill="var(--map-block)" />
+
+                <!-- river curve sweeping across mid-low -->
+                <path d="M -10 640 Q 90 596 180 642 T 410 614 L 410 720 L -10 720 Z" fill="var(--map-river)" />
+                <path d="M -10 640 Q 90 596 180 642 T 410 614" stroke="var(--map-river-edge)" stroke-width="3" fill="none" />
+
+                <!-- bottom strip (across river) -->
+                <rect x="24"  y="740" width="108" height="48" rx="10" fill="var(--map-block)" />
+                <rect x="158" y="744" width="108" height="44" rx="10" fill="var(--map-block)" />
+                <rect x="290" y="740" width="96"  height="48" rx="10" fill="var(--map-block)" />
+
+                <!-- vertical arteries -->
+                <line x1="148" y1="-10" x2="148" y2="810" stroke="var(--map-road)" stroke-width="13" stroke-linecap="round" />
+                <line x1="280" y1="-10" x2="280" y2="810" stroke="var(--map-road)" stroke-width="13" stroke-linecap="round" />
+                <!-- horizontal arteries -->
+                <line x1="-10" y1="155"  x2="410" y2="155"  stroke="var(--map-road)" stroke-width="14" stroke-linecap="round" />
+                <line x1="-10" y1="310"  x2="410" y2="310"  stroke="var(--map-road)" stroke-width="14" stroke-linecap="round" />
+                <line x1="-10" y1="465"  x2="410" y2="465"  stroke="var(--map-road)" stroke-width="14" stroke-linecap="round" />
+                <!-- diagonal connector -->
+                <line x1="148" y1="310" x2="320" y2="220" stroke="var(--map-road)" stroke-width="9"  stroke-linecap="round" />
+
+                <!-- lane dashes -->
+                <line x1="-10" y1="155" x2="410" y2="155" stroke="var(--map-dash)" stroke-width="2" stroke-dasharray="8 9" class="lane-dash flow-right" />
+                <line x1="-10" y1="310" x2="410" y2="310" stroke="var(--map-dash)" stroke-width="2" stroke-dasharray="8 9" class="lane-dash flow-left" />
+                <line x1="-10" y1="465" x2="410" y2="465" stroke="var(--map-dash)" stroke-width="2" stroke-dasharray="8 9" class="lane-dash flow-right" />
+                <line x1="148" y1="-10" x2="148" y2="810" stroke="var(--map-dash)" stroke-width="2" stroke-dasharray="8 9" class="lane-dash flow-down" />
+                <line x1="280" y1="-10" x2="280" y2="810" stroke="var(--map-dash)" stroke-width="2" stroke-dasharray="8 9" class="lane-dash flow-up" />
+            </svg>
+
+            <!-- mock GPS dot — placed near ST-01 (Wangsimni, NEAR distance)
+                 so the geofence demo lines up visually. -->
+            <div class="gps-dot" id="gps-dot" style="left:32%; top:48%;"></div>
+        </div>
+
+        <!-- ============================================================
+             FLOATING HEADER (over the map)
+             ============================================================ -->
+        <header class="floating-header">
+            <div class="title-pill neu-out">
+                <div class="title-dot" id="title-dot"></div>
+                <h1 id="connection-text">CityBike</h1>
+            </div>
+            <div style="display: flex; gap: 0.6rem;">
+                <button class="icon-btn neu-out" id="theme-btn" onclick="toggleTheme()" aria-label="Toggle dark mode">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                        stroke-linecap="round" stroke-linejoin="round" id="theme-icon">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+                <button class="icon-btn neu-out" id="tutorial-btn" onclick="openTutorial()" aria-label="Quick guide">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"></path>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- ============================================================
+             FLOATING SUMMARY PILL (top-center, over map)
+             ============================================================ -->
+        <div class="summary-pill neu-out" id="summary-pill">
+            <div class="sp-num" id="total-bikes">--</div>
+            <div class="sp-meta">
+                <div class="sp-label">Active Bikes</div>
+                <div class="sp-sub" id="sp-sub">Live</div>
+            </div>
+        </div>
+
+        <!-- ============================================================
+             RIDING BANNER (slides in from top when active)
+             ============================================================ -->
+        <div class="ride-banner neu-in" id="ride-banner">
+            <div class="ride-pulse"></div>
+            <div class="rb-text" id="ride-text">Riding B-0000</div>
+            <div class="rb-timer" id="ride-timer">00:00</div>
+        </div>
+
+        <!-- ============================================================
+             FAB (Scan to Ride)
+             ============================================================ -->
+        <button class="fab" id="fab" onclick="onFabClick()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+                stroke-linejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                <line x1="14" y1="14" x2="21" y2="14"></line>
+                <line x1="14" y1="18" x2="21" y2="18"></line>
+                <line x1="18" y1="14" x2="18" y2="21"></line>
+            </svg>
+            <span id="fab-label">Scan to Ride</span>
+        </button>
+
+        <!-- ============================================================
+             BOTTOM SHEET (slides up from bottom on orb tap)
+             ============================================================ -->
+        <div class="sheet-scrim" id="sheet-scrim" onclick="closeSheet()"></div>
+        <div class="bottom-sheet" id="bottom-sheet" aria-hidden="true">
+            <div class="sheet-handle" onclick="closeSheet()"></div>
+            <div class="sheet-body" id="sheet-body">
+                <!-- injected by JS -->
+            </div>
+        </div>
+
+        <!-- ============================================================
+             OVERLAY (modal host — blur + center)
+             ============================================================ -->
+        <div class="overlay" id="overlay">
+            <div class="modal neu-out" id="modal"><!-- modal content injected --></div>
+        </div>
+    </div>
+
+    <!-- External JavaScript -->
+    <script src="js/state.js"></script>
+    <script src="js/chart-builder.js"></script>
+    <script src="js/ui-core.js"></script>
+    <script src="js/journey.js"></script>
+    <script src="js/mqtt-client.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

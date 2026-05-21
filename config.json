@@ -1,0 +1,37 @@
+{
+    "broker": "broker.hivemq.com",
+    "port": 8883,
+    "topic": "smartcity/hanyang/bikeshare/state",
+    "demo_mode": "MORNING_RUSH",
+    "update_interval": 3,
+    "stations": [
+        {
+            "parking_id": "ST-01",
+            "name": "Wangsimni Station",
+            "area": "Seongdong-gu",
+            "distance": "NEAR",
+            "is_open": true,
+            "initial_bikes": 25
+        },
+        {
+            "parking_id": "ST-02",
+            "name": "Hanyang Univ. Main Gate",
+            "area": "Seongdong-gu",
+            "distance": "FAR",
+            "is_open": true,
+            "initial_bikes": 25
+        },
+        {
+            "parking_id": "ST-03",
+            "name": "Student Dormitory",
+            "area": "Seongdong-gu",
+            "distance": "FAR",
+            "is_open": true,
+            "initial_bikes": 25
+        }
+    ],
+    "context": {
+        "holiday": false,
+        "event": "None"
+    }
+}
