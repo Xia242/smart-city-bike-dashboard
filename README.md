@@ -8,8 +8,9 @@
 
 <div align="center">
   <br>
-  <img src="assets/dark-mode-toggle.gif" width="48%" alt="Dark Mode Toggle">
-  <img src="assets/light-mode.png" width="48%" alt="Light Mode UI">
+  <img src="assets/light-mode.png" height="500" alt="Light Mode UI">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/dark-mode-toggle.gif" height="500" alt="Dark Mode Toggle">
   <p><i>A tactile <b>Neumorphism UI</b> featuring high-contrast Dark Mode integration.</i></p>
   <br>
 </div>
@@ -18,8 +19,9 @@ A real-time, event-driven smart city bike-sharing dashboard and simulation backe
 
 <div align="center">
   <br>
-  <img src="assets/data-forecast.gif" width="48%" alt="Live Data & Forecast">
-  <img src="assets/ride-journey.gif" width="48%" alt="Ride Journey State Machine">
+  <img src="assets/data-forecast.gif" height="500" alt="Live Data & Forecast">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="assets/ride-journey.gif" height="500" alt="Ride Journey State Machine">
   <p><i>Zero-dependency SVG trend charts & robust ride state machine.</i></p>
   <br>
 </div>
