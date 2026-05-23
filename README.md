@@ -6,7 +6,23 @@
 ![PWA](https://img.shields.io/badge/PWA-Ready-success.svg)
 ![Architecture](https://img.shields.io/badge/Architecture-Event_Driven-lightgrey.svg)
 
+<div align="center">
+  <br>
+  <img src="assets/light-mode.png" width="48%" alt="Light Mode UI">
+  <video src="assets/dark-mode-toggle.mov" width="48%" autoplay loop muted playsinline></video>
+  <p><i>A tactile <b>Neumorphism UI</b> featuring high-contrast Dark Mode integration.</i></p>
+  <br>
+</div>
+
 A real-time, event-driven smart city bike-sharing dashboard and simulation backend. Designed with a premium **Neumorphism** user interface and powered by MQTT, this project demonstrates a complete IoT telemetry flow, featuring dynamic predictive analytics and edge-case handling (e.g., RFID failures, geofencing).
+
+<div align="center">
+  <br>
+  <video src="assets/data-forecast.mov" width="48%" autoplay loop muted playsinline></video>
+  <video src="assets/ride-journey.mov" width="48%" autoplay loop muted playsinline></video>
+  <p><i>Zero-dependency SVG trend charts & robust ride state machine.</i></p>
+  <br>
+</div>
 
 ---
 
