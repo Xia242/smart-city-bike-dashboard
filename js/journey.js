@@ -4,7 +4,7 @@
 
 function onFabClick() {
     if (state.journey.state === 'riding') openParkModal(false);
-    else openScanModal();
+    else if (state.journey.state === 'idle') openScanModal();
 }
 
 function openScanModal() {
@@ -24,11 +24,11 @@ function openScanModal() {
         const dist = getStationPreset(z.parking_id).distance;
         const disabled = (z.status !== true) ? "disabled" : "";
         const sub = (z.status !== true) ? "Station closed" : `${z.bikes} bikes available`;
-        chips += `<button class="station-chip" ${disabled} onclick="scanStation('${z.parking_id}')">
+        chips += `<button class="station-chip" ${disabled} onclick="scanStation('${escapeHTML(z.parking_id)}')">
             <span class="chip-dot" style="background:${(statusConfig[z.status_display] || statusConfig.NORMAL).color}"></span>
             <span class="chip-body">
-                <div class="chip-name">${z.name}</div>
-                <div class="chip-meta">${z.parking_id} · ${sub}</div>
+                <div class="chip-name">${escapeHTML(z.name)}</div>
+                <div class="chip-meta">${escapeHTML(z.parking_id)} · ${sub}</div>
             </span>
             <span class="chip-dist dist-${dist}">${dist}</span>
         </button>`;
@@ -51,15 +51,17 @@ function openScanModal() {
     `);
 }
 
-function scanStation(pid) {
+async function scanStation(pid) {
+    if (state.pendingCommand || state.journey.state !== "idle") return;
     const preset = getStationPreset(pid);
     const zone = getZone(pid);
+    if (!zone || zone.status !== true) return;
 
     if (preset.distance === "FAR") {
         openModal(`
             <div class="modal-icon neu-in" style="color:#cf5757;">⚠️</div>
             <div class="modal-title">Geofence Error</div>
-            <div class="modal-text">You are currently more than <b>500 m</b> away from <b>${zone.name}</b>. Please go to the station to scan and unlock.</div>
+            <div class="modal-text">You are currently more than <b>500 m</b> away from <b>${escapeHTML(zone.name)}</b>. Please go to the station to scan and unlock.</div>
             <div class="btn-row">
                 <button class="mbtn" onclick="openScanModal()">Back</button>
                 <button class="mbtn danger" onclick="cancelJourney()">Close</button>
@@ -73,12 +75,13 @@ function scanStation(pid) {
         openModal(`
             <div class="modal-icon neu-in" style="color:#c2701b;">🚲</div>
             <div class="modal-title">No Bikes Available</div>
-            <div class="modal-text">There are no available bikes at <b>${zone.name}</b> right now.</div>
+            <div class="modal-text">There are no available bikes at <b>${escapeHTML(zone.name)}</b> right now.</div>
             <button class="mbtn full" onclick="openScanModal()">Back</button>
         `);
         return;
     }
 
+    try { await sendCommand('reserve', pid, bike.bike_id); } catch (e) { showCommandError(e); return; }
     state.journey.state = 'reserved';
     state.journey.bikeId = bike.bike_id;
     state.journey.originId = pid;
@@ -93,8 +96,8 @@ function showUnlockModal() {
     openModal(`
         <div class="bike-focus neu-in">
             <span class="bike-pill pill-RESERVED">Reserved</span>
-            <span class="bf-id">${state.journey.bikeId}</span>
-            <span class="modal-sub">${zone.name} · ${zone.parking_id}</span>
+            <span class="bf-id">${escapeHTML(state.journey.bikeId)}</span>
+            <span class="modal-sub">${escapeHTML(zone.name)} · ${escapeHTML(zone.parking_id)}</span>
         </div>
         <div class="modal-text">This bike is reserved for you. Unlock now to start your ride.</div>
         <div class="btn-row">
@@ -105,26 +108,30 @@ function showUnlockModal() {
     `);
 }
 
-function cancelUnlock() {
+async function cancelUnlock() {
+    if (state.pendingCommand) return;
+    try { await sendCommand('cancel', state.journey.originId, state.journey.bikeId); }
+    catch (e) { showCommandError(e); return; }
     resetJourney();
     closeModal();
     resumeLive();
 }
 
-function confirmUnlock() {
-    const zone = getZone(state.journey.originId);
-    setBikeStatus(state.journey.originId, state.journey.bikeId, "TAKEN");
-    zone.bikes = Math.max(0, zone.bikes - 1);
-    state.displayData.total_bikes = Math.max(0, state.displayData.total_bikes - 1);
+async function confirmUnlock() {
+    if (state.pendingCommand || state.journey.state !== 'reserved') return false;
+    try { await sendCommand('unlock', state.journey.originId, state.journey.bikeId); }
+    catch (e) { showCommandError(e); return false; }
     state.journey.state = 'riding';
-    render();
     startRiding();
     closeModal();
+    return true;
 }
 
-function startRiding() {
+function startRiding(startTime = Date.now()) {
     setFab('riding');
-    state.rideStart = Date.now();
+    clearInterval(state.rideInterval);
+    state.rideStart = startTime;
+    document.getElementById("ride-timer").innerText = "00:00";
     const banner = document.getElementById("ride-banner");
     document.getElementById("ride-text").innerText = "Riding " + state.journey.bikeId;
     banner.classList.add("show");
@@ -146,18 +153,18 @@ function openParkModal(immediate) {
     let chips = "";
     state.displayData.zone_data.forEach(z => {
         const closed = z.status !== true;
-        chips += `<button class="station-chip" ${closed ? 'disabled' : ''} onclick="beginVerification('${z.parking_id}')">
+        chips += `<button class="station-chip" ${closed ? 'disabled' : ''} onclick="beginVerification('${escapeHTML(z.parking_id)}')">
             <span class="chip-dot" style="background:${(statusConfig[z.status_display] || statusConfig.NORMAL).color}"></span>
             <span class="chip-body">
-                <div class="chip-name">${z.name}</div>
-                <div class="chip-meta">${z.parking_id} · ${closed ? 'Closed' : z.bikes + ' bikes docked'}</div>
+                <div class="chip-name">${escapeHTML(z.name)}</div>
+                <div class="chip-meta">${escapeHTML(z.parking_id)} · ${closed ? 'Closed' : z.bikes + ' bikes docked'}</div>
             </span>
         </button>`;
     });
     openModal(`
         <div class="modal-icon neu-in" style="color:#c2701b;">🅿️</div>
         <div class="modal-title">${immediate ? 'Lock Bike Here' : 'End Ride — Return Bike'}</div>
-        <div class="modal-sub">Choose the station you are returning ${state.journey.bikeId} to</div>
+        <div class="modal-sub">Choose the station you are returning ${escapeHTML(state.journey.bikeId)} to</div>
         <div class="chip-stack">${chips}</div>
         <button class="mbtn ghost full" onclick="closeParkModal()">Keep Riding</button>
     `);
@@ -169,29 +176,21 @@ function closeParkModal() {
 }
 
 function beginVerification(returnId) {
+    if (state.pendingCommand || !['riding', 'verification_failed'].includes(state.journey.state)) return;
+    const target = getZone(returnId);
+    if (!target || target.status !== true) return;
+    state.journey.state = 'verifying';
+    clearTimeout(state.verificationTimer);
+    const token = ++state.verificationToken;
     state.journey.returnId = returnId;
     state.journey.rfidFail = false;
     const zone = getZone(returnId);
 
-    if (state.journey.originId && state.journey.originId !== returnId) {
-        const origin = getZone(state.journey.originId);
-        if (origin) {
-            origin.bike_ids = (origin.bike_ids || []).filter(b => b.bike_id !== state.journey.bikeId);
-        }
-    }
-
-    if (!zone.bike_ids.find(b => b.bike_id === state.journey.bikeId)) {
-        zone.bike_ids.push({ bike_id: state.journey.bikeId, status: "PARKING" });
-    } else {
-        const existing = zone.bike_ids.find(b => b.bike_id === state.journey.bikeId);
-        existing.status = "PARKING";
-    }
-
     openModal(`
         <div class="bike-focus neu-in">
             <span class="bike-pill pill-PARKING">Parking</span>
-            <span class="bf-id">${state.journey.bikeId}</span>
-            <span class="modal-sub">${zone.name} · ${zone.parking_id}</span>
+            <span class="bf-id">${escapeHTML(state.journey.bikeId)}</span>
+            <span class="modal-sub">${escapeHTML(zone.name)} · ${escapeHTML(zone.parking_id)}</span>
         </div>
         <div class="modal-title" style="font-size:0.98rem;">⏳ Matching RFID signal &amp; virtual geofence...</div>
         <div class="prog-track neu-in"><div class="prog-fill" id="prog-fill"></div></div>
@@ -201,13 +200,13 @@ function beginVerification(returnId) {
         <button class="rfid-test" id="rfid-btn" onclick="toggleRfidFail()">🔧 Simulate RFID Failure: OFF</button>
     `);
 
-    const dur = 3000 + Math.random() * 2000;
+    const dur = 15000;
     const fill = document.getElementById("prog-fill");
     requestAnimationFrame(() => {
         fill.style.transition = `width ${dur}ms linear`;
         fill.style.width = "100%";
     });
-    setTimeout(() => finishVerification(), dur + 120);
+    state.verificationTimer = setTimeout(() => { if (token === state.verificationToken) finishVerification(); }, dur);
 }
 
 function toggleRfidFail() {
@@ -218,14 +217,16 @@ function toggleRfidFail() {
     btn.innerText = "🔧 Simulate RFID Failure: " + (state.journey.rfidFail ? "ON" : "OFF");
 }
 
-function finishVerification() {
+async function finishVerification() {
+    if (state.pendingCommand || !["verifying", "verification_failed"].includes(state.journey.state)) return;
     const zone = getZone(state.journey.returnId);
 
     if (state.journey.rfidFail) {
+        state.journey.state = "verification_failed";
         openModal(`
             <div class="modal-icon neu-in" style="color:#cf5757;">📡</div>
             <div class="modal-title">RFID Not Detected</div>
-            <div class="modal-text">The dock's RFID reader could not detect ${state.journey.bikeId}. Please wait for the system to re-pair automatically, or contact on-site staff to complete the return with a hand-held scanner.</div>
+            <div class="modal-text">The dock's RFID reader could not detect ${escapeHTML(state.journey.bikeId)}. Please wait for the system to re-pair automatically, or contact on-site staff to complete the return with a hand-held scanner.</div>
             <div class="btn-row">
                 <button class="mbtn primary" onclick="retryVerification()">Retry Pairing</button>
                 <button class="mbtn" onclick="forceComplete()">Staff Assisted</button>
@@ -234,25 +235,28 @@ function finishVerification() {
         return;
     }
 
-    const b = zone.bike_ids.find(x => x.bike_id === state.journey.bikeId);
-    if (b) b.status = "AVAILABLE";
-    zone.bikes += 1;
-    state.displayData.total_bikes += 1;
-    render();
+    try { await sendCommand('return', state.journey.returnId, state.journey.bikeId); }
+    catch (e) {
+        state.journey.state = 'verification_failed';
+        openModal(`<div class="modal-title">Return not confirmed</div>
+            <div class="modal-text">${escapeHTML(e.message)}</div>
+            <button class="mbtn full" onclick="retryVerification()">Retry</button>`);
+        return;
+    }
+    state.journey.state = 'returned';
+    stopRiding();
 
     openModal(`
         <div class="modal-icon neu-in" style="color:#1f9d6b;">✓</div>
         <div class="modal-title">Return Successful</div>
-        <div class="modal-text"><b>${state.journey.bikeId}</b> has been registered at <b>${zone.name}</b> and is now available for the next rider.</div>
+        <div class="modal-text"><b>${escapeHTML(state.journey.bikeId)}</b> has been registered at <b>${escapeHTML(zone.name)}</b> and is now available for the next rider.</div>
         <button class="mbtn go full" onclick="endJourney()">Done</button>
     `);
 }
 
 function retryVerification() {
-    const rid = state.journey.returnId;
-    const z = getZone(rid);
-    z.bike_ids = z.bike_ids.filter(x => x.bike_id !== state.journey.bikeId);
-    beginVerification(rid);
+    if (state.journey.state !== 'verification_failed') return;
+    beginVerification(state.journey.returnId);
 }
 
 function forceComplete() {
@@ -261,29 +265,28 @@ function forceComplete() {
 }
 
 function resetJourney() {
+    clearTimeout(state.verificationTimer);
+    state.verificationToken++;
     state.journey = { state: 'idle', bikeId: null, originId: null, returnId: null, rfidFail: false };
     stopRiding();
 }
 
 function cancelJourney() {
+    if (state.pendingCommand) return;
+    if (state.journey.state === "reserved") return cancelUnlock();
+    if (state.journey.state !== "idle") return;
     resetJourney();
     closeModal();
     resumeLive();
 }
 
 function endJourney() {
+    if (state.journey.state !== "returned") return;
     resetJourney();
     closeModal();
     resumeLive();
 }
 
-function immediatePark() {
-    const zone = getZone(state.journey.originId);
-    setBikeStatus(state.journey.originId, state.journey.bikeId, "TAKEN");
-    zone.bikes = Math.max(0, zone.bikes - 1);
-    state.displayData.total_bikes = Math.max(0, state.displayData.total_bikes - 1);
-    state.journey.state = 'riding';
-    render();
-    startRiding();
-    openParkModal(true);
+async function immediatePark() {
+    if (await confirmUnlock()) openParkModal(true);
 }

@@ -6,6 +6,8 @@ import time
 import json
 import random
 import sys
+import re
+from queue import Queue, Empty, Full
 from collections import deque
 from datetime import datetime, timedelta
 
@@ -236,6 +238,13 @@ class CitySimulator:
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
+        self.client.on_message = self.on_message
+        self.commands = Queue(maxsize=1000)
+        self.replies = {}
+        self.owners = {}
+        self.in_transit = {}
+        self.origins = {}
+        self.ride_started = {}
 
         # Throttle: only append a real history sample once per bucket.
         self.last_history_sample = datetime.now()
@@ -254,6 +263,8 @@ class CitySimulator:
         self.topic = self.config.get("topic", "smartcity/hanyang/bikeshare/state")
         self.demo_mode = self.config.get("demo_mode", "MORNING_RUSH")
         self.update_interval = self.config.get("update_interval", 3)
+        if not isinstance(self.update_interval, (int, float)) or not math.isfinite(self.update_interval) or self.update_interval <= 0:
+            raise ValueError("update_interval must be positive")
 
         self.context_tags = {
             "rush_hour": self.demo_mode == "MORNING_RUSH",
@@ -320,6 +331,7 @@ class CitySimulator:
     # ---- MQTT callbacks ----
     def on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code == 0:
+            client.subscribe(self.topic + "/command")
             print(f"{Colors.GREEN}\u2713 Connected to MQTT Broker ({self.broker}:{self.port}){Colors.ENDC}")
             print(f"{Colors.CYAN}  Publishing to: {self.topic}{Colors.ENDC}\n")
         else:
@@ -330,30 +342,30 @@ class CitySimulator:
 
     # ---- bike movement ----
     def simulate_bikes(self):
-        station_names = list(self.stations.keys())
+        station_names = [name for name, station in self.stations.items() if station.is_open]
 
         if self.demo_mode == "MORNING_RUSH":
             main = "Hanyang Univ. Main Gate"
-            if main not in self.stations:
-                sources = [s for s in station_names if len(self.stations[s].bikes) > 0]
+            if main not in station_names:
+                sources = [s for s in station_names if any(b.status == "AVAILABLE" for b in self.stations[s].bikes)]
                 destinations = station_names
             else:
                 # Prevent "black hole" effect
                 if len(self.stations[main].bikes) >= 35:
-                    sources = [main]
+                    sources = [main] if any(b.status == "AVAILABLE" for b in self.stations[main].bikes) else []
                     destinations = [s for s in station_names if s != main]
                 else:
                     elapsed = time.time() - getattr(self, 'start_time', time.time())
                     prob = 0.95 if elapsed < 60 else 0.8
                     if random.random() < prob:
                         sources = [s for s in station_names
-                                   if s != main and len(self.stations[s].bikes) > 0]
+                                   if s != main and any(b.status == "AVAILABLE" for b in self.stations[s].bikes)]
                         destinations = [main]
                     else:
-                        sources = [s for s in station_names if len(self.stations[s].bikes) > 0]
+                        sources = [s for s in station_names if any(b.status == "AVAILABLE" for b in self.stations[s].bikes)]
                         destinations = station_names
         else:
-            sources = [s for s in station_names if len(self.stations[s].bikes) > 0]
+            sources = [s for s in station_names if any(b.status == "AVAILABLE" for b in self.stations[s].bikes)]
             destinations = station_names
 
         if not sources:
@@ -371,11 +383,13 @@ class CitySimulator:
         dest_station = self.stations[dest_name]
 
         # Move 1 to 3 bikes per tick (was 1-2; bigger fleet -> faster motion)
-        num_to_move = random.randint(1, min(3, len(src_station.bikes)))
+        available = [b for b in src_station.bikes if b.status == "AVAILABLE"]
+        num_to_move = random.randint(1, min(3, len(available)))
         moved = []
 
         for _ in range(num_to_move):
-            bike = random.choice(src_station.bikes)
+            bike = random.choice(available)
+            available.remove(bike)
             src_station.remove_bike(bike)
             dest_station.add_bike(bike)
             moved.append(bike.bike_id)
@@ -395,7 +409,7 @@ class CitySimulator:
                 station.record_history_sample(now)
             self.last_history_sample = now
 
-    def publish_state(self):
+    def snapshot(self, force_full=False):
         now = datetime.now()
         self.maybe_sample_history(now)
 
@@ -403,7 +417,7 @@ class CitySimulator:
         if not hasattr(self, 'tick_count'):
             self.tick_count = 0
         self.tick_count += 1
-        is_full = (self.tick_count % 3 == 1)
+        is_full = force_full or (self.tick_count % 3 == 1)
 
         rush = self.context_tags["rush_hour"]
         zone_data = []
@@ -425,10 +439,113 @@ class CitySimulator:
         payload = {
             "type": "FULL" if is_full else "DELTA",
             "timestamp": now.strftime("%H:%M:%S"),
-            "total_bikes": self.total_bikes,
+            "total_bikes": sum(len(st.bikes) for st in self.stations.values()),
             "zone_data": zone_data,
         }
-        self.client.publish(self.topic, json.dumps(payload))
+        return payload
+
+    def publish_state(self):
+        self.client.publish(self.topic, json.dumps(self.snapshot()))
+
+    def on_message(self, client, userdata, message):
+        if message.topic != self.topic + "/command" or len(message.payload) > 4096:
+            return
+        try:
+            command = json.loads(message.payload)
+            self.commands.put_nowait(command)
+        except (ValueError, Full):
+            return
+
+    def process_command(self, command):
+        if not isinstance(command, dict):
+            return None
+        valid_id = lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,120}", x)
+        client_id, request_id = command.get("client_id"), command.get("request_id")
+        if not valid_id(client_id) or not valid_id(request_id):
+            return None
+        key = (client_id, request_id)
+        if command.get("action") == "sync":
+            return {"request_id": request_id, "ok": True, "snapshot": self.snapshot(True),
+                    "journey": self.journey_for(client_id)}
+        if key in self.replies:
+            # Return a fresh snapshot without executing a duplicate command again.
+            return {**self.replies[key], "snapshot": self.snapshot(True)}
+        station = next((s for s in self.stations.values() if s.parking_id == command.get("station_id")), None)
+        bike_id, action = command.get("bike_id"), command.get("action")
+        error = None
+        if not valid_id(bike_id) or station is None:
+            error = "Unknown station or bike"
+        else:
+            bike = next((b for b in station.bikes if b.bike_id == bike_id), None)
+            owner = self.owners.get(bike_id)
+            if action == "reserve":
+                if not station.is_open or not bike or (owner and owner != client_id) or bike.status not in ("AVAILABLE", "RESERVED"):
+                    error = "Bike is not available"
+                elif any(o == client_id and b != bike_id for b, o in self.owners.items()):
+                    error = "Finish your current ride first"
+                else:
+                    self.owners[bike_id] = client_id
+                    self.origins[bike_id] = station.parking_id
+                    bike.status = "RESERVED"
+            elif action == "cancel":
+                if owner == client_id and bike and bike.status == "RESERVED":
+                    bike.status = "AVAILABLE"
+                    del self.owners[bike_id]
+                    self.origins.pop(bike_id, None)
+                    self.ride_started.pop(bike_id, None)
+                elif owner is not None:
+                    error = "Cannot cancel this ride"
+            elif action == "unlock":
+                if owner != client_id:
+                    error = "Reserve the bike first"
+                elif bike_id in self.in_transit:
+                    pass  # Idempotent retry after a lost acknowledgement.
+                elif not station.is_open or not bike or bike.status != "RESERVED":
+                    error = "Bike cannot be unlocked"
+                else:
+                    station.remove_bike(bike)
+                    bike.status = "TAKEN"
+                    self.in_transit[bike_id] = bike
+                    self.ride_started[bike_id] = int(time.time() * 1000)
+            elif action == "return":
+                if owner == client_id and bike_id in self.in_transit and station.is_open:
+                    bike = self.in_transit.pop(bike_id)
+                    bike.status = "AVAILABLE"
+                    station.add_bike(bike)
+                    del self.owners[bike_id]
+                    self.origins.pop(bike_id, None)
+                    self.ride_started.pop(bike_id, None)
+                elif bike and bike.status == "AVAILABLE" and owner is None:
+                    pass  # Already returned: never add a second copy.
+                else:
+                    error = "Bike cannot be returned at this station"
+            else:
+                error = "Unknown command"
+        result = {"request_id": request_id, "ok": error is None, "error": error}
+        self.replies[key] = result
+        if len(self.replies) > 1000:
+            del self.replies[next(iter(self.replies))]
+        return {**result, "snapshot": self.snapshot(True)}
+
+    def journey_for(self, client_id):
+        bike_id = next((b for b, owner in self.owners.items() if owner == client_id), None)
+        if bike_id is None:
+            return None
+        return {"state": "riding" if bike_id in self.in_transit else "reserved",
+                "bikeId": bike_id, "originId": self.origins[bike_id],
+                "rideStart": self.ride_started.get(bike_id)}
+
+    def drain_commands(self):
+        # Run on the simulation thread to serialize moves and user actions.
+        for _ in range(100):
+            try:
+                command = self.commands.get_nowait()
+            except Empty:
+                return
+            result = self.process_command(command)
+            if result is not None:
+                self.client.publish(self.topic + "/reply/" + command["client_id"], json.dumps(result))
+                self.client.publish(self.topic, json.dumps(result["snapshot"]))
 
     # ---- main loop ----
     def run(self):
@@ -453,10 +570,14 @@ class CitySimulator:
         self.client.loop_start()
 
         try:
+            next_tick = time.monotonic()
             while True:
-                self.simulate_bikes()
-                self.publish_state()
-                time.sleep(self.update_interval)
+                self.drain_commands()
+                if time.monotonic() >= next_tick:
+                    self.simulate_bikes()
+                    self.publish_state()
+                    next_tick = time.monotonic() + self.update_interval
+                time.sleep(0.05)
         except KeyboardInterrupt:
             print(f"\n{Colors.WARNING}Simulator stopped.{Colors.ENDC}")
         finally:

@@ -5,7 +5,15 @@
 const BROKER = "broker.hivemq.com";
 const PORT = 8884;
 const TOPIC = "smartcity/hanyang/bikeshare/state";
-const CLIENT_ID = "citybike_neu_" + Math.random().toString(16).substring(2, 10);
+const CLIENT_ID = (() => {
+    const fresh = "citybike_neu_" + Math.random().toString(16).substring(2, 10);
+    try {
+        const stored = sessionStorage.getItem('citybike-client');
+        const id = stored && /^citybike_neu_[a-f0-9]{8}$/.test(stored) ? stored : fresh;
+        sessionStorage.setItem('citybike-client', id);
+        return id;
+    } catch (_) { return fresh; }
+})();
 
 const statusConfig = {
     "NORMAL":               { text: "Good",     color: "var(--orb-green)",  glow: "var(--orb-green-glow)"  },
@@ -26,10 +34,10 @@ const FALLBACK_SLOTS = [
     { mapX: 40, mapY: 14 },
     { mapX: 14, mapY: 18 },
 ];
-const fallbackAssigned = {};
+const fallbackAssigned = Object.create(null);
 
 function getStationPreset(parkingId) {
-    if (STATION_PRESET[parkingId]) return STATION_PRESET[parkingId];
+    if (Object.hasOwn(STATION_PRESET, parkingId)) return STATION_PRESET[parkingId];
     if (fallbackAssigned[parkingId]) return fallbackAssigned[parkingId];
     const usedCount = Object.keys(fallbackAssigned).length;
     const slot = FALLBACK_SLOTS[usedCount % FALLBACK_SLOTS.length];
@@ -40,6 +48,9 @@ function getStationPreset(parkingId) {
 const ETA_BADGE_THRESHOLD_MIN = 10;
 
 const state = {
+    pendingCommand: false,
+    verificationTimer: null,
+    verificationToken: 0,
     liveData: null,
     displayData: null,
     modalOpen: false,
@@ -66,4 +77,8 @@ function setBikeStatus(pid, bikeId, status) {
     if (!z) return;
     const b = (z.bike_ids || []).find(x => x.bike_id === bikeId);
     if (b) b.status = status;
+}
+
+function escapeHTML(value) {
+    return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
 }

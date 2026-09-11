@@ -98,7 +98,7 @@ function renderSheetBody(zone) {
     let tags = "";
     if (t.rush_hour) tags += `<span class="tag rush">⚡ Rush Hour</span>`;
     if (t.holiday) tags += `<span class="tag holiday">🎌 Holiday</span>`;
-    if (t.event && t.event !== "None") tags += `<span class="tag event">🎤 ${t.event}</span>`;
+    if (t.event && t.event !== "None") tags += `<span class="tag event">🎤 ${escapeHTML(t.event)}</span>`;
     if (!tags) tags = `<span class="tag calm">○ Normal Hours</span>`;
 
     const hc = zone.historical_compare || "0%";
@@ -123,8 +123,8 @@ function renderSheetBody(zone) {
     let rows = "";
     bikes.forEach(b => {
         rows += `<div class="bike-row neu-in">
-            <span class="bike-id">🚲 ${b.bike_id}</span>
-            <span class="bike-pill pill-${b.status}">${b.status}</span>
+            <span class="bike-id">🚲 ${escapeHTML(b.bike_id)}</span>
+            <span class="bike-pill pill-${escapeHTML(b.status)}">${escapeHTML(b.status)}</span>
         </div>`;
     });
     if (!bikes.length) rows = `<div class="modal-sub" style="padding:6px 0;">No bikes docked.</div>`;
@@ -132,9 +132,9 @@ function renderSheetBody(zone) {
     document.getElementById("sheet-body").innerHTML = `
         <div class="sheet-head">
             <div class="sheet-head-left">
-                <div class="sheet-zone-label">${zone.parking_id} · ${zone.area}</div>
+                <div class="sheet-zone-label">${escapeHTML(zone.parking_id)} · ${escapeHTML(zone.area)}</div>
                 <div class="sheet-zone-name">
-                    ${zone.name}
+                    ${escapeHTML(zone.name)}
                     <span class="open-badge ${isOpen ? 'open' : 'closed'}">
                         <span class="dot"></span>${isOpen ? 'Open' : 'Closed'}
                     </span>
@@ -148,7 +148,7 @@ function renderSheetBody(zone) {
         </div>
         <div class="tag-row">${tags}</div>
         ${etaHtml}
-        <div class="hist">vs. avg today: <b class="${dir}">${hc}</b>
+        <div class="hist">vs. avg today: <b class="${dir}">${escapeHTML(hc)}</b>
             ${zone.net_flow_per_min !== undefined
               ? ` · net flow <b>${zone.net_flow_per_min >= 0 ? '+' : ''}${zone.net_flow_per_min.toFixed(2)}</b>/min`
               : ''}
@@ -163,14 +163,14 @@ function renderSheetBody(zone) {
             </div>
             ${trendSvg}
         </div>
-        <div class="bike-toggle neu-in ${isExp ? 'open' : ''}" onclick="togglePanel('${zone.parking_id}')">
+        <div class="bike-toggle neu-in ${isExp ? 'open' : ''}" onclick="togglePanel('${escapeHTML(zone.parking_id)}')">
             <span>🚲 Bike Details (${dockedCount})</span>
             <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                 stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
         </div>
-        <div class="bike-panel ${isExp ? 'open' : ''}" id="panel-${zone.parking_id}">
+        <div class="bike-panel ${isExp ? 'open' : ''}" id="panel-${escapeHTML(zone.parking_id)}">
             <div class="bike-panel-inner">${rows}</div>
         </div>
     `;
@@ -217,6 +217,7 @@ function setTitleDot(color, glow) {
 }
 
 function openTutorial() {
+    if (state.journey.state !== "idle" || state.pendingCommand) return;
     openModal(`
         <div class="modal-icon neu-in" style="color:var(--accent-blue);">?</div>
         <div class="modal-title">Quick Guide</div>

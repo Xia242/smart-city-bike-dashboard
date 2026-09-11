@@ -132,3 +132,12 @@ smart-city-bike-dashboard/
 
 ## 📄 License
 Copyright (c) 2026 Wei-Chieh Hsia. All rights reserved.
+
+## Validation and ride commands
+
+Run `python -m unittest discover -s tests -v` and `node --test tests/*.cjs` (Node.js 20+).
+For a deterministic browser integration check, run `python tests/preview_server.py` and open `http://127.0.0.1:8765`. This test-only server substitutes the MQTT transport with HTTP while exercising the actual frontend and simulator command handlers. It does not publish test traffic to the public broker.
+
+The dashboard now sends reserve, unlock, cancel, and return commands to `<topic>/command`. Replies arrive on `<topic>/reply/<client-id>`. Only acknowledged changes are shown as successful; retries reuse a request ID and are idempotent. Reserved bikes are excluded from simulated traffic. Cross-station returns update the simulator, so pressing Done no longer restores the old station. RFID verification waits 15 seconds; it remains a simulated sensor check.
+
+Run the updated backend together with the updated frontend. The default public MQTT broker is a shared demonstration environment, not an authenticated rental service: client IDs coordinate rides but are not proof of identity. For a private deployment, configure an authenticated broker with topic ACLs and corresponding frontend connection settings. Bike inventory and ride state remain in memory for the simulator lifetime. Reloading the same tab restores its active reservation or ride from the backend; restarting the simulator resets the demonstration.
